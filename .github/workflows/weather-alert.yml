@@ -1,0 +1,35 @@
+name: Severe weather alert
+
+# Runs on GitHub's servers — your computer does NOT need to be on.
+on:
+  schedule:
+    # Time is in UTC. 10:00 UTC = 6:00 AM Eastern (EDT, summer) / 5:00 AM Eastern (EST, winter).
+    # Pick an earlier hour by lowering the number (e.g. "0 9 * * *" = 5 AM EDT / 4 AM EST).
+    # Note: GitHub may delay scheduled runs by a few minutes during busy periods — fine for a morning email.
+    - cron: "0 10 * * *"
+  # Lets you trigger a run by hand from the Actions tab (great for testing).
+  workflow_dispatch:
+
+jobs:
+  check-weather:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run weather check and email if needed
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_TO: ${{ secrets.ALERT_TO }}
+          # Optional overrides (uncomment in this file to change behavior):
+          # WX_COUNTIES: "Marion,Hamilton,Hendricks,Boone,Hancock,Johnson,Morgan,Shelby,Madison"
+          # WX_PRECIP_THRESHOLD: "50"
+          # WX_HOURS_AHEAD: "36"
+          # WX_ALWAYS_SEND: "0"
+        run: python severe_weather_alert.py
