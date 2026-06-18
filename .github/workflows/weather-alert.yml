@@ -31,5 +31,5 @@ jobs:
           # WX_COUNTIES: "Marion,Hamilton,Hendricks,Boone,Hancock,Johnson,Morgan,Shelby,Madison"
           # WX_PRECIP_THRESHOLD: "50"
           # WX_HOURS_AHEAD: "36"
-          # WX_ALWAYS_SEND: "0"
+          WX_ALWAYS_SEND: "1"
         run: python severe_weather_alert.py
