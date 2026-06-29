@@ -1,0 +1,69 @@
+[
+  {
+    "name": "Lafayette, IN",
+    "lat": 40.4167,
+    "lon": -86.8753
+  },
+  {
+    "name": "Fort Wayne, IN",
+    "lat": 41.0793,
+    "lon": -85.1394
+  },
+  {
+    "name": "Danville, IL",
+    "lat": 40.1245,
+    "lon": -87.6300
+  },
+  {
+    "name": "Rockford, IL",
+    "lat": 42.2711,
+    "lon": -89.0940
+  },
+  {
+    "name": "Detroit & suburbs, MI",
+    "lat": 42.3314,
+    "lon": -83.0458,
+    "extra_points": [[42.4775, -83.0277], [42.6056, -83.1499], [42.3223, -83.1763]]
+  },
+  {
+    "name": "Petoskey area, MI",
+    "lat": 45.3733,
+    "lon": -84.9553,
+    "extra_points": [[45.3186, -85.2581]]
+  },
+  {
+    "name": "Columbus area, OH",
+    "lat": 39.9612,
+    "lon": -82.9988,
+    "extra_points": [[40.2887, -83.0680]]
+  },
+  {
+    "name": "Cincinnati area, OH",
+    "lat": 39.1031,
+    "lon": -84.5120,
+    "extra_points": [[39.3676, -84.4072], [39.0773, -84.1769]]
+  },
+  {
+    "name": "Philadelphia area, PA",
+    "lat": 39.9526,
+    "lon": -75.1652,
+    "extra_points": [[40.1215, -75.3399], [39.9168, -75.3877], [40.3101, -75.1299]]
+  },
+  {
+    "name": "Elizabethtown, KY",
+    "lat": 37.6936,
+    "lon": -85.8591
+  },
+  {
+    "name": "Denver & surrounding, CO",
+    "lat": 39.7392,
+    "lon": -104.9903,
+    "extra_points": [[39.7294, -104.8319], [39.7047, -105.0814], [40.0150, -105.2705], [39.3722, -104.8561]]
+  },
+  {
+    "name": "Seattle & surrounding, WA",
+    "lat": 47.6062,
+    "lon": -122.3321,
+    "extra_points": [[47.6101, -122.2015], [47.2529, -122.4443], [47.9790, -122.2021]]
+  }
+]
