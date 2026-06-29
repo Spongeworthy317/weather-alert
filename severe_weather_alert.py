@@ -1,275 +1,71 @@
-#!/usr/bin/env python3
-"""
-Severe weather email alert for the greater Indianapolis metro area.
+# SiteFinder (curated list) — Setup & Deploy
 
-Runs on a schedule (e.g. GitHub Actions cron), checks the National Weather
-Service API for active alerts and the short-term forecast, and emails you
-ONLY when severe weather, rain, or snow is coming. Silent on clear days.
+A simple static page that shows a list of SharePoint sites *you* choose.
+Users can search, filter by category, **Open** a site, or **Request access**.
+No sign-in, no Entra app, no Graph permissions — just edit a list and deploy.
 
-Configuration is via environment variables (see the README). The only
-required ones are the three email secrets:
-    GMAIL_USER, GMAIL_APP_PASSWORD, ALERT_TO
-"""
+~5 minutes.
 
-import os
-import sys
-import json
-import time
-import smtplib
-import urllib.request
-import urllib.error
-from datetime import datetime, timezone
-from email.message import EmailMessage
+---
 
-# --------------------------------------------------------------------------
-# Configuration (override any of these with environment variables)
-# --------------------------------------------------------------------------
-LAT = os.environ.get("WX_LAT", "39.7684")          # downtown Indianapolis
-LON = os.environ.get("WX_LON", "-86.1581")
-STATE = os.environ.get("WX_STATE", "IN")
+## Step 1 — Edit your site list
 
-# Counties that make up the greater Indianapolis metro. An alert is included
-# if its area description mentions any of these. Edit to taste.
-COUNTIES = [c.strip().lower() for c in os.environ.get(
-    "WX_COUNTIES",
-    "Marion,Hamilton,Hendricks,Boone,Hancock,Johnson,Morgan,Shelby,Madison",
-).split(",") if c.strip()]
+Open `index.html` and edit the `SITES` array near the top:
 
-# Forecast lookahead and the precip probability that counts as "rain/snow".
-HOURS_AHEAD = int(os.environ.get("WX_HOURS_AHEAD", "36"))
-PRECIP_THRESHOLD = int(os.environ.get("WX_PRECIP_THRESHOLD", "50"))  # percent
+```js
+window.SITES = [
+  {
+    name: "HR & Benefits",
+    url: "https://YOURTENANT.sharepoint.com/sites/HR",
+    description: "Policies, PTO, benefits enrollment.",
+    category: "Company"
+  },
+  // add as many as you like…
+];
+```
 
-# Words in a forecast that mean precipitation worth flagging.
-PRECIP_WORDS = ["rain", "snow", "shower", "thunderstorm", "sleet",
-                "freezing", "wintry", "blizzard", "flurr", "drizzle", "ice"]
+- `name` and `url` are required. `description` and `category` are optional.
+- `category` becomes a filter chip at the top (sites with the same category group together). Leave it off to skip filtering.
+- Tip: in SharePoint, the site URL is what's in the address bar, e.g. `https://contoso.sharepoint.com/sites/Finance`.
 
-# Send an email even when there is nothing to report (handy for a one-time
-# "is this working?" test). Set WX_ALWAYS_SEND=1 to enable.
-ALWAYS_SEND = os.environ.get("WX_ALWAYS_SEND", "0") == "1"
+Save the file.
 
-# Email
-GMAIL_USER = os.environ.get("GMAIL_USER", "")
-GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
-ALERT_TO = [a.strip() for a in os.environ.get("ALERT_TO", "").split(",") if a.strip()]
-ALERT_FROM = os.environ.get("ALERT_FROM", GMAIL_USER)
+---
 
-# NWS requires a descriptive User-Agent with a contact. Override if you like.
-USER_AGENT = os.environ.get(
-    "WX_USER_AGENT",
-    "indy-severe-weather-alert/1.0 (%s)" % (GMAIL_USER or "anonymous@example.com"),
-)
-PLACE_NAME = os.environ.get("WX_PLACE_NAME", "Greater Indianapolis")
+## Step 2 — Deploy to Netlify
 
+1. Put `index.html` in a folder by itself.
+2. Go to **app.netlify.com → Add new site → Deploy manually**.
+3. Drag the folder onto the page. You get a URL like `https://your-name.netlify.app`.
+4. (Optional) **Site settings → Change site name** to brand it.
 
-# --------------------------------------------------------------------------
-# NWS API helpers
-# --------------------------------------------------------------------------
-def api_get(url, retries=3, backoff=3):
-    """GET a NWS API URL, returning parsed JSON. Retries on transient errors."""
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/geo+json"}
-    last_err = None
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.load(resp)
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as e:
-            last_err = e
-            if attempt < retries - 1:
-                time.sleep(backoff * (attempt + 1))
-    raise RuntimeError("NWS request failed after %d tries: %s\n%s"
-                       % (retries, url, last_err))
+That's the whole deploy. Updating the list later = edit `index.html`, drag the folder again (or connect a Git repo for auto-deploys).
 
+---
 
-def get_forecast_url():
-    """Resolve the forecast URL for the configured point."""
-    data = api_get("https://api.weather.gov/points/%s,%s" % (LAT, LON))
-    return data["properties"]["forecast"]
+## Step 3 — Put it on people's desktops
 
+- **Manual:** right-click desktop → New → Shortcut → paste the Netlify URL.
+- **At scale (Intune):** Apps → Windows → add a **Web link** pointed at the URL; it appears on the Start menu / desktop for a group.
+- **Group Policy:** push a `.url` file to `%PUBLIC%\Desktop`:
+  ```
+  [InternetShortcut]
+  URL=https://YOURAPP.netlify.app/
+  ```
+- **Or skip the desktop:** pin the URL as a Teams tab or add it to the SharePoint app bar.
 
-def get_active_alerts():
-    """Return alerts for the state, filtered to our metro counties."""
-    data = api_get("https://api.weather.gov/alerts/active?area=%s" % STATE)
-    out = []
-    for feat in data.get("features", []):
-        p = feat.get("properties", {})
-        area = (p.get("areaDesc") or "").lower()
-        if COUNTIES and not any(county in area for county in COUNTIES):
-            continue
-        out.append({
-            "event": p.get("event", "Weather alert"),
-            "severity": p.get("severity", ""),
-            "headline": p.get("headline", ""),
-            "area": p.get("areaDesc", ""),
-            "onset": p.get("onset") or p.get("effective", ""),
-            "expires": p.get("expires", ""),
-            "description": (p.get("description") or "").strip(),
-            "instruction": (p.get("instruction") or "").strip(),
-        })
-    # De-duplicate identical events (NWS often splits by zone).
-    seen, deduped = set(), []
-    for a in out:
-        key = (a["event"], a["headline"])
-        if key not in seen:
-            seen.add(key)
-            deduped.append(a)
-    return deduped
+---
 
+## How "Request access" works
 
-def get_precip_periods(forecast_url):
-    """Return forecast periods within HOURS_AHEAD that look like rain/snow."""
-    data = api_get(forecast_url)
-    periods = data.get("properties", {}).get("periods", [])
-    now = datetime.now(timezone.utc)
-    hits = []
-    for per in periods:
-        try:
-            start = datetime.fromisoformat(per["startTime"])
-        except Exception:
-            start = now
-        hours_out = (start - now).total_seconds() / 3600.0
-        if hours_out > HOURS_AHEAD:
-            continue
-        short = (per.get("shortForecast") or "").lower()
-        pop = per.get("probabilityOfPrecipitation", {}) or {}
-        pop_val = pop.get("value")
-        word_hit = any(w in short for w in PRECIP_WORDS)
-        pop_hit = isinstance(pop_val, (int, float)) and pop_val >= PRECIP_THRESHOLD
-        if word_hit or pop_hit:
-            hits.append({
-                "name": per.get("name", ""),
-                "short": per.get("shortForecast", ""),
-                "detailed": per.get("detailedForecast", ""),
-                "pop": pop_val,
-                "temp": per.get("temperature"),
-                "unit": per.get("temperatureUnit", ""),
-            })
-    return hits
+- **Default (no setup):** the button opens the site. If the user lacks permission, **SharePoint's own "request access" page appears automatically** and routes to the site owner. This is usually all you need.
+- **Tracked approvals (optional):** create a Power Automate flow with a **"When an HTTP request is received"** trigger (payload `{ "siteName": "...", "siteUrl": "..." }`), add an Approval + "Add member" step, then paste the flow's URL into `window.REQUEST_WEBHOOK_URL` in `index.html` and redeploy.
 
+---
 
-# --------------------------------------------------------------------------
-# Email composition
-# --------------------------------------------------------------------------
-def fmt_time(iso):
-    if not iso:
-        return ""
-    try:
-        return datetime.fromisoformat(iso).strftime("%a %b %-d, %-I:%M %p")
-    except Exception:
-        return iso
+## When to graduate to the auto-discovery version
 
-
-def build_email(alerts, precip):
-    today = datetime.now().strftime("%b %-d")
-    if alerts:
-        worst = alerts[0]["event"]
-        subject = "⚠️ Weather alert — %s (%s): %s" % (PLACE_NAME, today, worst)
-    else:
-        subject = "\U0001f327️ Rain/snow expected — %s (%s)" % (PLACE_NAME, today)
-
-    lines = []
-    html = ["<div style='font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#1a1a1a'>"]
-    html.append("<p style='font-size:17px;font-weight:bold;margin:0 0 6px'>Bad weather is coming — %s</p>" % PLACE_NAME)
-    lines.append("Bad weather is coming — %s\n" % PLACE_NAME)
-
-    if alerts:
-        lines.append("ACTIVE NWS ALERTS")
-        lines.append("=================")
-        html.append("<h3 style='margin:14px 0 6px'>Active NWS alerts</h3>")
-        for a in alerts:
-            lines.append("\n* %s (%s)" % (a["event"], a["severity"] or "n/a"))
-            if a["headline"]:
-                lines.append("  %s" % a["headline"])
-            if a["expires"]:
-                lines.append("  In effect until: %s" % fmt_time(a["expires"]))
-            if a["area"]:
-                lines.append("  Area: %s" % a["area"])
-            if a["instruction"]:
-                lines.append("  Guidance: %s" % a["instruction"])
-            html.append(
-                "<div style='border-left:4px solid #c0392b;background:#fbeaea;"
-                "padding:8px 12px;margin:8px 0'>"
-                "<div style='font-weight:bold;color:#c0392b'>%s (%s)</div>"
-                "<div>%s</div>"
-                "<div style='color:#555;font-size:13px;margin-top:4px'>In effect until: %s</div>"
-                "<div style='color:#555;font-size:13px'>Area: %s</div>"
-                "%s</div>" % (
-                    a["event"], a["severity"] or "n/a", a["headline"],
-                    fmt_time(a["expires"]), a["area"],
-                    ("<div style='margin-top:4px'>%s</div>" % a["instruction"]) if a["instruction"] else "",
-                )
-            )
-
-    if precip:
-        lines.append("\nFORECAST — RAIN / SNOW")
-        lines.append("=======================")
-        html.append("<h3 style='margin:14px 0 6px'>Forecast — rain / snow</h3>")
-        for p in precip:
-            pop = ("  (%d%% chance)" % p["pop"]) if isinstance(p["pop"], (int, float)) else ""
-            temp = (" — %s°%s" % (p["temp"], p["unit"])) if p["temp"] is not None else ""
-            lines.append("\n* %s%s: %s%s" % (p["name"], temp, p["short"], pop))
-            lines.append("  %s" % p["detailed"])
-            html.append(
-                "<div style='border-left:4px solid #2c6fbb;background:#eaf1fb;"
-                "padding:8px 12px;margin:8px 0'>"
-                "<div style='font-weight:bold;color:#2c6fbb'>%s%s</div>"
-                "<div>%s%s</div>"
-                "<div style='color:#555;font-size:13px;margin-top:4px'>%s</div></div>"
-                % (p["name"], temp, p["short"], pop, p["detailed"])
-            )
-
-    if not alerts and not precip:
-        lines.append("No active alerts and no rain/snow in the forecast window.")
-        html.append("<p>No active alerts and no rain/snow in the forecast window.</p>")
-
-    footer = "Source: National Weather Service (api.weather.gov). Sent %s." % (
-        datetime.now().strftime("%a %b %-d %-I:%M %p"))
-    lines.append("\n---\n%s" % footer)
-    html.append("<p style='color:#888;font-size:12px;margin-top:16px'>%s</p></div>" % footer)
-
-    return subject, "\n".join(lines), "".join(html)
-
-
-def send_email(subject, text_body, html_body):
-    if not (GMAIL_USER and GMAIL_APP_PASSWORD and ALERT_TO):
-        raise SystemExit("Missing email config: set GMAIL_USER, GMAIL_APP_PASSWORD, ALERT_TO.")
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = ALERT_FROM
-    msg["To"] = ", ".join(ALERT_TO)
-    msg.set_content(text_body)
-    msg.add_alternative(html_body, subtype="html")
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as s:
-        s.starttls()
-        s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-        s.send_message(msg)
-
-
-# --------------------------------------------------------------------------
-# Main
-# --------------------------------------------------------------------------
-def main():
-    print("Checking weather for %s (counties: %s)" % (PLACE_NAME, ", ".join(COUNTIES)))
-    forecast_url = get_forecast_url()
-    alerts = get_active_alerts()
-    precip = get_precip_periods(forecast_url)
-    print("Found %d alert(s), %d precip period(s)." % (len(alerts), len(precip)))
-
-    if not alerts and not precip and not ALWAYS_SEND:
-        print("Clear skies — no email sent.")
-        return
-
-    subject, text_body, html_body = build_email(alerts, precip)
-    send_email(subject, text_body, html_body)
-    print("Email sent: %s" % subject)
-
-
-if __name__ == "__main__":
-    try:
-        main()
-    except SystemExit:
-        raise
-    except Exception as e:
-        # Fail loudly so the GitHub Actions run shows red and you get notified.
-        print("ERROR: %s" % e, file=sys.stderr)
-        sys.exit(1)
+This curated version is best when there's a known set of sites people need.
+If you'd rather the app **automatically list every site each user can see**
+(no manual list to maintain), that's the Microsoft Graph version — it needs a
+quick Entra app registration. Ask and I'll hand that one back.
